@@ -25,6 +25,35 @@ Responde siempre en español, salvo que el usuario solicite explícitamente otro
 `;
 
 const MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
+const MAX_HISTORY_MESSAGES = 20;
+
+function jsonResponse(data, status, corsHeaders) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=UTF-8",
+      ...corsHeaders,
+    },
+  });
+}
+
+function normalizeHistory(messages) {
+  if (!Array.isArray(messages)) return [];
+
+  return messages
+    .filter(
+      (item) =>
+        item &&
+        (item.role === "user" || item.role === "assistant") &&
+        typeof item.content === "string" &&
+        item.content.trim()
+    )
+    .slice(-MAX_HISTORY_MESSAGES)
+    .map((item) => ({
+      role: item.role,
+      content: item.content.trim(),
+    }));
+}
 
 export default {
   async fetch(request, env) {
@@ -42,97 +71,82 @@ export default {
     }
 
     if (request.method === "GET") {
-      return new Response(
-        JSON.stringify({
+      return jsonResponse(
+        {
           ok: true,
           name: "Calixto AI",
-          version: "0.2.0",
+          version: "0.3.0",
           message: "Calixto AI está funcionando.",
-        }),
-        {
-          headers: {
-            "Content-Type": "application/json; charset=UTF-8",
-            ...corsHeaders,
-          },
-        }
+        },
+        200,
+        corsHeaders
       );
     }
 
     if (request.method !== "POST") {
-      return new Response(
-        JSON.stringify({ error: "Método no permitido." }),
-        {
-          status: 405,
-          headers: {
-            "Content-Type": "application/json; charset=UTF-8",
-            ...corsHeaders,
-          },
-        }
+      return jsonResponse(
+        { error: "Método no permitido." },
+        405,
+        corsHeaders
       );
     }
 
     try {
       const body = await request.json();
-      const message = body?.message;
+      const message =
+        typeof body?.message === "string" ? body.message.trim() : "";
+      const history = normalizeHistory(body?.messages);
 
-      if (!message || typeof message !== "string") {
-        return new Response(
-          JSON.stringify({ error: "Falta el mensaje." }),
-          {
-            status: 400,
-            headers: {
-              "Content-Type": "application/json; charset=UTF-8",
-              ...corsHeaders,
-            },
-          }
+      if (!message && history.length === 0) {
+        return jsonResponse(
+          { error: "Falta el mensaje." },
+          400,
+          corsHeaders
         );
       }
 
+      const conversation = [
+        {
+          role: "system",
+          content: SYSTEM_PROMPT,
+        },
+        ...history,
+      ];
+
+      if (message) {
+        conversation.push({
+          role: "user",
+          content: message,
+        });
+      }
+
       const response = await env.AI.run(MODEL, {
-        messages: [
-          {
-            role: "system",
-            content: SYSTEM_PROMPT,
-          },
-          {
-            role: "user",
-            content: message.trim(),
-          },
-        ],
-        max_tokens: 512,
-        temperature: 0.6,
+        messages: conversation,
+        max_tokens: 768,
+        temperature: 0.65,
       });
 
       const text = response?.response || "No he podido generar una respuesta.";
 
-      return new Response(
-        JSON.stringify({
+      return jsonResponse(
+        {
           ok: true,
           reply: text,
           model: MODEL,
-        }),
-        {
-          headers: {
-            "Content-Type": "application/json; charset=UTF-8",
-            ...corsHeaders,
-          },
-        }
+        },
+        200,
+        corsHeaders
       );
     } catch (error) {
       console.error("Error interno:", error);
 
-      return new Response(
-        JSON.stringify({
+      return jsonResponse(
+        {
           ok: false,
           error: "Ha ocurrido un error al hablar con Calixto.",
-        }),
-        {
-          status: 500,
-          headers: {
-            "Content-Type": "application/json; charset=UTF-8",
-            ...corsHeaders,
-          },
-        }
+        },
+        500,
+        corsHeaders
       );
     }
   },
