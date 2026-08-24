@@ -43,7 +43,10 @@ function jsonResponse(data, status, corsHeaders) {
 
 function normalizeHistory(messages) {
   if (!Array.isArray(messages)) return [];
-  return messages.filter(item => item && (item.role === "user" || item.role === "assistant") && typeof item.content === "string" && item.content.trim()).slice(-MAX_HISTORY_MESSAGES).map(item => ({ role: item.role, content: item.content.trim() }));
+  return messages
+    .filter(item => item && (item.role === "user" || item.role === "assistant") && typeof item.content === "string" && item.content.trim())
+    .slice(-MAX_HISTORY_MESSAGES)
+    .map(item => ({ role: item.role, content: item.content.trim() }));
 }
 
 function getMemoryToSave(message) {
@@ -87,12 +90,23 @@ export default {
 
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
 
-    if (request.method === "GET") return jsonResponse({ ok: true, name: "Calixto AI", version: "0.5.1", message: "Calixto AI está funcionando." }, 200, corsHeaders);
+    if (request.method === "GET") return jsonResponse({ ok: true, name: "Calixto AI", version: "0.5.2", message: "Calixto AI está funcionando." }, 200, corsHeaders);
 
     if (request.method !== "POST") return jsonResponse({ error: "Método no permitido." }, 405, corsHeaders);
 
     try {
-      const body = await request.json();
+      const rawBody = await request.text();
+      if (!rawBody.trim()) {
+        return jsonResponse({ ok: false, error: "El cuerpo de la petición está vacío. Envía JSON con message, user_id y conversation_id." }, 400, corsHeaders);
+      }
+
+      let body;
+      try {
+        body = JSON.parse(rawBody);
+      } catch {
+        return jsonResponse({ ok: false, error: "El cuerpo no contiene JSON válido." }, 400, corsHeaders);
+      }
+
       const message = typeof body?.message === "string" ? body.message.trim() : "";
       const clientHistory = normalizeHistory(body?.messages);
       const userId = typeof body?.user_id === "string" && body.user_id.trim() ? body.user_id.trim() : DEFAULT_USER_ID;
