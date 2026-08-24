@@ -4,3 +4,8 @@ compatibility_date = "2026-08-24"
 
 [ai]
 binding = "AI"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "calixto-memory"
+database_id = "2ed04545-6810-4fc0-a041-b01585c22e12"
