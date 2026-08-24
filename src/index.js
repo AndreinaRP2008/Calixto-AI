@@ -19,13 +19,17 @@ Si una respuesta depende de información que no tienes, dilo claramente.
 Esta es la versión de Calixto destinada a una aplicación independiente.
 No actúas como el asistente del portfolio de Gabriela y no debes asumir que
 conoces información privada del usuario que no haya sido proporcionada en
-la conversación o mediante una futura función de memoria autorizada.
+la conversación o mediante una función de memoria autorizada.
+
+Cuando recibas recuerdos del usuario en el contexto, utilízalos solo como
+información de contexto. No afirmes recordar algo que no aparezca en ellos.
 
 Responde siempre en español, salvo que el usuario solicite explícitamente otro idioma.
 `;
 
 const MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
 const MAX_HISTORY_MESSAGES = 20;
+const DEFAULT_USER_ID = "demo-user";
 
 function jsonResponse(data, status, corsHeaders) {
   return new Response(JSON.stringify(data), {
@@ -55,6 +59,46 @@ function normalizeHistory(messages) {
     }));
 }
 
+function getMemoryToSave(message) {
+  const match = message.match(
+    /^(?:calixto[,:]?\s*)?(?:recuerda|recuerdame|recuerda que|recuerda esto|guarda esto)\s*:?[\s]+(.+)$/i
+  );
+
+  return match?.[1]?.trim() || null;
+}
+
+function isForgetRequest(message) {
+  return /^(?:calixto[,:]?\s*)?(?:olvida|olvid[aá] esto|olvida que|borra este recuerdo|elimina este recuerdo)/i.test(
+    message.trim()
+  );
+}
+
+async function saveMemory(env, userId, memory) {
+  await env.DB.prepare(
+    "INSERT INTO memories (user_id, memory) VALUES (?, ?)"
+  )
+    .bind(userId, memory)
+    .run();
+}
+
+async function deleteLatestMemory(env, userId) {
+  await env.DB.prepare(
+    "DELETE FROM memories WHERE id = (SELECT id FROM memories WHERE user_id = ? ORDER BY id DESC LIMIT 1)"
+  )
+    .bind(userId)
+    .run();
+}
+
+async function getMemories(env, userId) {
+  const result = await env.DB.prepare(
+    "SELECT id, memory, created_at FROM memories WHERE user_id = ? ORDER BY id DESC LIMIT 20"
+  )
+    .bind(userId)
+    .all();
+
+  return result.results || [];
+}
+
 export default {
   async fetch(request, env) {
     const corsHeaders = {
@@ -75,7 +119,7 @@ export default {
         {
           ok: true,
           name: "Calixto AI",
-          version: "0.3.0",
+          version: "0.4.0",
           message: "Calixto AI está funcionando.",
         },
         200,
@@ -96,6 +140,10 @@ export default {
       const message =
         typeof body?.message === "string" ? body.message.trim() : "";
       const history = normalizeHistory(body?.messages);
+      const userId =
+        typeof body?.user_id === "string" && body.user_id.trim()
+          ? body.user_id.trim()
+          : DEFAULT_USER_ID;
 
       if (!message && history.length === 0) {
         return jsonResponse(
@@ -105,10 +153,32 @@ export default {
         );
       }
 
+      let memorySaved = false;
+      let memoryDeleted = false;
+
+      // Solo guardamos información cuando el usuario lo solicita explícitamente.
+      const memoryToSave = message ? getMemoryToSave(message) : null;
+
+      if (memoryToSave) {
+        await saveMemory(env, userId, memoryToSave);
+        memorySaved = true;
+      } else if (message && isForgetRequest(message)) {
+        await deleteLatestMemory(env, userId);
+        memoryDeleted = true;
+      }
+
+      const memories = await getMemories(env, userId);
+
+      const memoryContext = memories.length
+        ? `\n\nMEMORIA AUTORIZADA DEL USUARIO:\n${memories
+            .map((item) => `- ${item.memory}`)
+            .join("\n")}`
+        : "";
+
       const conversation = [
         {
           role: "system",
-          content: SYSTEM_PROMPT,
+          content: SYSTEM_PROMPT + memoryContext,
         },
         ...history,
       ];
@@ -133,6 +203,11 @@ export default {
           ok: true,
           reply: text,
           model: MODEL,
+          memory: {
+            saved: memorySaved,
+            deleted: memoryDeleted,
+            count: memories.length,
+          },
         },
         200,
         corsHeaders
