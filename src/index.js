@@ -24,12 +24,16 @@ la conversación o mediante una función de memoria autorizada.
 Cuando recibas recuerdos del usuario en el contexto, utilízalos solo como
 información de contexto. No afirmes recordar algo que no aparezca en ellos.
 
+El historial de conversación también forma parte del contexto autorizado.
+Utilízalo para mantener coherencia y continuidad entre mensajes.
+
 Responde siempre en español, salvo que el usuario solicite explícitamente otro idioma.
 `;
 
 const MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
 const MAX_HISTORY_MESSAGES = 20;
 const DEFAULT_USER_ID = "demo-user";
+const DEFAULT_CONVERSATION_ID = "default";
 
 function jsonResponse(data, status, corsHeaders) {
   return new Response(JSON.stringify(data), {
@@ -99,6 +103,24 @@ async function getMemories(env, userId) {
   return result.results || [];
 }
 
+async function saveConversationMessage(env, userId, conversationId, role, content) {
+  await env.DB.prepare(
+    "INSERT INTO conversation_messages (user_id, conversation_id, role, content) VALUES (?, ?, ?, ?)"
+  )
+    .bind(userId, conversationId, role, content)
+    .run();
+}
+
+async function getConversationHistory(env, userId, conversationId) {
+  const result = await env.DB.prepare(
+    "SELECT role, content FROM conversation_messages WHERE user_id = ? AND conversation_id = ? ORDER BY id DESC LIMIT ?"
+  )
+    .bind(userId, conversationId, MAX_HISTORY_MESSAGES)
+    .all();
+
+  return (result.results || []).reverse();
+}
+
 export default {
   async fetch(request, env) {
     const corsHeaders = {
@@ -119,7 +141,7 @@ export default {
         {
           ok: true,
           name: "Calixto AI",
-          version: "0.4.0",
+          version: "0.5.0",
           message: "Calixto AI está funcionando.",
         },
         200,
@@ -139,13 +161,17 @@ export default {
       const body = await request.json();
       const message =
         typeof body?.message === "string" ? body.message.trim() : "";
-      const history = normalizeHistory(body?.messages);
+      const clientHistory = normalizeHistory(body?.messages);
       const userId =
         typeof body?.user_id === "string" && body.user_id.trim()
           ? body.user_id.trim()
           : DEFAULT_USER_ID;
+      const conversationId =
+        typeof body?.conversation_id === "string" && body.conversation_id.trim()
+          ? body.conversation_id.trim()
+          : DEFAULT_CONVERSATION_ID;
 
-      if (!message && history.length === 0) {
+      if (!message && clientHistory.length === 0) {
         return jsonResponse(
           { error: "Falta el mensaje." },
           400,
@@ -156,7 +182,6 @@ export default {
       let memorySaved = false;
       let memoryDeleted = false;
 
-      // Solo guardamos información cuando el usuario lo solicita explícitamente.
       const memoryToSave = message ? getMemoryToSave(message) : null;
 
       if (memoryToSave) {
@@ -168,6 +193,13 @@ export default {
       }
 
       const memories = await getMemories(env, userId);
+      const storedHistory = await getConversationHistory(
+        env,
+        userId,
+        conversationId
+      );
+
+      const history = storedHistory.length ? storedHistory : clientHistory;
 
       const memoryContext = memories.length
         ? `\n\nMEMORIA AUTORIZADA DEL USUARIO:\n${memories
@@ -198,11 +230,37 @@ export default {
 
       const text = response?.response || "No he podido generar una respuesta.";
 
+      if (message) {
+        await saveConversationMessage(
+          env,
+          userId,
+          conversationId,
+          "user",
+          message
+        );
+      }
+
+      await saveConversationMessage(
+        env,
+        userId,
+        conversationId,
+        "assistant",
+        text
+      );
+
+      const updatedHistory = await getConversationHistory(
+        env,
+        userId,
+        conversationId
+      );
+
       return jsonResponse(
         {
           ok: true,
           reply: text,
           model: MODEL,
+          conversation_id: conversationId,
+          history_count: updatedHistory.length,
           memory: {
             saved: memorySaved,
             deleted: memoryDeleted,
