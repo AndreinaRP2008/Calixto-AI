@@ -2,5 +2,5 @@ name = "calixto-ai-app"
 main = "src/index.js"
 compatibility_date = "2026-08-24"
 
-# La integración con Workers AI se añadirá en una fase posterior.
-# Las variables y bindings sensibles no se guardan en este archivo.
+[ai]
+binding = "AI"
