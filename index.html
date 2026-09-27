@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#080912">
+  <meta name="description" content="Calixto AI — asistente personal de inteligencia artificial.">
+  <title>Calixto AI</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="brand"><div class="brand-mark" aria-hidden="true"><span></span><span></span></div><div><strong>Calixto</strong><small>AI Assistant</small></div></div>
+      <div class="status" id="status"><span></span>Listo</div>
+      <button class="icon-btn" id="settingsBtn" type="button" aria-label="Configurar conexión">⚙</button>
+    </header>
+    <section class="hero" id="hero">
+      <div class="avatar-wrap"><div class="avatar"><div class="avatar-core"></div></div></div>
+      <p class="eyebrow">PERSONAL AI</p>
+      <h1>Hola, soy <span>Calixto.</span></h1>
+      <p class="hero-copy">Tu asistente personal para pensar, crear, aprender y construir.</p>
+    </section>
+    <section class="chat" aria-label="Conversación con Calixto">
+      <div class="messages" id="messages" aria-live="polite"></div>
+      <div class="thinking" id="thinking" hidden><div class="thinking-avatar">C</div><div class="thinking-bubble"><i></i><i></i><i></i></div></div>
+      <form class="composer" id="composer">
+        <textarea id="messageInput" rows="1" maxlength="8000" placeholder="Escribe a Calixto..." autocomplete="off"></textarea>
+        <button class="send-btn" id="sendBtn" type="submit" aria-label="Enviar mensaje"><span>↑</span></button>
+      </form>
+      <p class="hint">Enter para enviar · Shift + Enter para nueva línea</p>
+    </section>
+  </main>
+  <dialog id="settingsDialog">
+    <form method="dialog" class="settings-card" id="settingsForm">
+      <button class="close-btn" value="cancel" type="submit" aria-label="Cerrar">×</button>
+      <p class="eyebrow">CONEXIÓN</p><h2>Conecta el cerebro de Calixto</h2>
+      <p>Introduce la URL pública de tu Cloudflare Worker. Se guarda únicamente en este navegador.</p>
+      <label for="apiUrl">Worker API</label>
+      <input id="apiUrl" type="url" placeholder="https://ai-calixto.tu-subdominio.workers.dev" spellcheck="false">
+      <div class="settings-actions"><button class="secondary" id="clearConfig" type="button">Borrar</button><button class="primary" value="default" type="submit">Guardar</button></div>
+      <p class="settings-note" id="settingsNote"></p>
+    </form>
+  </dialog>
+  <script src="./app.js"></script>
+</body>
+</html>
