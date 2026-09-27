@@ -12,10 +12,11 @@ const clearConfig=document.getElementById("clearConfig");
 const settingsNote=document.getElementById("settingsNote");
 
 const STORAGE_KEY="calixto_api_url";
+const DEFAULT_API_URL="https://ai-calixto.g17346900.workers.dev";
 const USER_KEY="calixto_user_id";
 const CONVERSATION_KEY="calixto_conversation_id";
 
-const apiUrl=()=>localStorage.getItem(STORAGE_KEY)||"";
+const apiUrl=()=>localStorage.getItem(STORAGE_KEY)||DEFAULT_API_URL;
 const userId=()=>localStorage.getItem(USER_KEY)||"demo-user";
 
 let conversationId=localStorage.getItem(CONVERSATION_KEY)||"default";
@@ -57,8 +58,8 @@ function openSettings(message=""){
 }
 function saveUrl(){
   const value=apiInput.value.trim().replace(/\/$/,"");
-  if(!value){ localStorage.removeItem(STORAGE_KEY); return false; }
-  try{ new URL(value); }catch{ settingsNote.textContent="Introduce una URL válida."; return false; }
+  if(!value){localStorage.removeItem(STORAGE_KEY); return false;}
+  try{new URL(value);}catch{settingsNote.textContent="Introduce una URL válida."; return false;}
   localStorage.setItem(STORAGE_KEY,value);
   return true;
 }
@@ -72,7 +73,7 @@ async function healthCheck(){
 }
 async function sendMessage(text){
   const clean=text.trim();
-  if(!clean||!apiUrl()) { if(!apiUrl()) openSettings("Primero conecta tu Worker."); return; }
+  if(!clean||!apiUrl()){if(!apiUrl())openSettings("Primero conecta tu Worker.");return;}
   addMessage("user",clean);
   history.push({role:"user",content:clean});
   input.value=""; resizeInput(); setThinking(true); setStatus(true,"Calixto está pensando...");
@@ -88,7 +89,7 @@ async function sendMessage(text){
       })
     });
     const data=await response.json().catch(()=>({}));
-    if(!response.ok||!data.ok) throw new Error(data.error||"No se pudo obtener respuesta.");
+    if(!response.ok||!data.ok)throw new Error(data.error||"No se pudo obtener respuesta.");
     conversationId=data.conversation_id||conversationId;
     localStorage.setItem(CONVERSATION_KEY,conversationId);
     const reply=data.reply||"No recibí una respuesta.";
@@ -99,7 +100,7 @@ async function sendMessage(text){
     history.pop();
     addMessage("assistant",`No pude conectar con mi cerebro ahora mismo. ${error.message||""}`.trim());
     setStatus(false,"Error de conexión");
-  }finally{setThinking(false); input.focus();}
+  }finally{setThinking(false);input.focus();}
 }
 composer.addEventListener("submit",e=>{e.preventDefault();sendMessage(input.value)});
 input.addEventListener("input",resizeInput);
@@ -109,9 +110,10 @@ input.addEventListener("keydown",e=>{
 settingsBtn.addEventListener("click",()=>openSettings());
 clearConfig.addEventListener("click",()=>{
   localStorage.removeItem(STORAGE_KEY);
-  setStatus(false,"Configura la API");
-  settingsNote.textContent="Conexión eliminada.";
-  apiInput.value="";
+  setStatus(false,"Configurada por defecto");
+  settingsNote.textContent="Se restauró la URL oficial del Worker.";
+  apiInput.value=DEFAULT_API_URL;
+  healthCheck();
 });
 settingsForm.addEventListener("submit",e=>{
   e.preventDefault();
@@ -121,5 +123,5 @@ dialog.addEventListener("click",e=>{
   if(e.target===dialog)dialog.close();
 });
 
-if(apiUrl()) healthCheck(); else openSettings("Necesitamos la URL del Worker para empezar.");
+healthCheck();
 resizeInput();
