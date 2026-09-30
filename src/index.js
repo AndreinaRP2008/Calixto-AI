@@ -176,13 +176,19 @@ export default {
       let memorySaved = false;
       let memoryDeleted = false;
       const memoryToSave = message ? getMemoryToSave(message) : null;
+      const memoryTargetToDelete = message ? getMemoryTargetToDelete(message) : null;
 
       if (memoryToSave) {
         await saveMemory(env, userId, memoryToSave);
         memorySaved = true;
       } else if (message && isForgetRequest(message)) {
-        await deleteLatestMemory(env, userId);
-        memoryDeleted = true;
+        if (memoryTargetToDelete) {
+          const deletedCount = await deleteMemoryByTarget(env, userId, memoryTargetToDelete);
+          memoryDeleted = deletedCount > 0;
+        } else {
+          await deleteLatestMemory(env, userId);
+          memoryDeleted = true;
+        }
       }
 
       const memories = await getMemories(env, userId);
