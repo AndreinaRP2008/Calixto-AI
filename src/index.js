@@ -90,7 +90,7 @@ export default {
 
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
 
-    if (request.method === "GET") return jsonResponse({ ok: true, name: "Calixto AI", version: "0.5.2", message: "Calixto AI está funcionando." }, 200, corsHeaders);
+    if (request.method === "GET") return jsonResponse({ ok: true, name: "Calixto AI", version: "0.5.3", message: "Calixto AI está funcionando." }, 200, corsHeaders);
 
     if (request.method !== "POST") return jsonResponse({ error: "Método no permitido." }, 405, corsHeaders);
 
