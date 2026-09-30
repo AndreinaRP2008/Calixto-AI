@@ -17,6 +17,7 @@ REGLAS SOBRE MEMORIA:
 - Usa un recuerdo solo cuando sea relevante para responder.
 - No introduzcas recuerdos no relacionados solo porque estén disponibles.
 - No afirmes recordar algo que no aparezca en memoria o conversación.
+- Si el usuario pide olvidar o eliminar un dato, esa orden tiene prioridad absoluta. No vuelvas a usar ni mencionar ese dato después de que haya sido eliminado.
 
 REGLAS SOBRE HISTORIAL:
 - El historial pertenece únicamente al conversation_id actual.
@@ -149,7 +150,7 @@ export default {
 
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
 
-    if (request.method === "GET") return jsonResponse({ ok: true, name: "Calixto AI", version: "0.5.3", message: "Calixto AI está funcionando." }, 200, corsHeaders);
+    if (request.method === "GET") return jsonResponse({ ok: true, name: "Calixto AI", version: "0.6.0", message: "Calixto AI está funcionando." }, 200, corsHeaders);
 
     if (request.method !== "POST") return jsonResponse({ error: "Método no permitido." }, 405, corsHeaders);
 
@@ -182,13 +183,31 @@ export default {
         await saveMemory(env, userId, memoryToSave);
         memorySaved = true;
       } else if (message && isForgetRequest(message)) {
+        const deletedCount = memoryTargetToDelete
+          ? await deleteMemoryByTarget(env, userId, memoryTargetToDelete)
+          : 0;
+
         if (memoryTargetToDelete) {
-          const deletedCount = await deleteMemoryByTarget(env, userId, memoryTargetToDelete);
-          memoryDeleted = deletedCount > 0;
-        } else {
-          await deleteLatestMemory(env, userId);
-          memoryDeleted = true;
+          await deleteConversationMentions(env, userId, memoryTargetToDelete);
         }
+
+        memoryDeleted = deletedCount > 0;
+
+        const forgetReply = memoryDeleted
+          ? "De acuerdo. He eliminado ese recuerdo y no volveré a utilizarlo."
+          : "No encontré un recuerdo que coincidiera con eso, así que no he eliminado nada.";
+
+        await saveConversationMessage(env, userId, conversationId, "assistant", forgetReply);
+        const remainingMemories = await getMemories(env, userId);
+
+        return jsonResponse({
+          ok: true,
+          reply: forgetReply,
+          model: MODEL,
+          conversation_id: conversationId,
+          history_count: 1,
+          memory: { saved: false, deleted: memoryDeleted, count: remainingMemories.length },
+        }, 200, corsHeaders);
       }
 
       const memories = await getMemories(env, userId);
