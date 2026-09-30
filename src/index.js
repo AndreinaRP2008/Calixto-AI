@@ -54,8 +54,25 @@ function getMemoryToSave(message) {
   return match?.[1]?.trim() || null;
 }
 
+function getMemoryTargetToDelete(message) {
+  const text = message.trim();
+  const match = text.match(
+    /^(?:calixto[,:]?\s*)?(?:olvida|olvid[aá]|borra|elimina|quita|no recuerdes)\s+(?:de\s+(?:mi\s+)?memoria\s+)?(?:que\s+)?(.+)$/i
+  );
+
+  if (!match?.[1]) return null;
+
+  const target = match[1]
+    .trim()
+    .replace(/[.!?]+$/, "")
+    .replace(/^(?:esto|eso|este recuerdo|lo anterior)$/i, "")
+    .trim();
+
+  return target || null;
+}
+
 function isForgetRequest(message) {
-  return /^(?:calixto[,:]?\s*)?(?:olvida|olvid[aá] esto|olvida que|borra este recuerdo|elimina este recuerdo)/i.test(message.trim());
+  return Boolean(getMemoryTargetToDelete(message));
 }
 
 async function saveMemory(env, userId, memory) {
@@ -64,6 +81,48 @@ async function saveMemory(env, userId, memory) {
 
 async function deleteLatestMemory(env, userId) {
   await env.DB.prepare("DELETE FROM memories WHERE id = (SELECT id FROM memories WHERE user_id = ? ORDER BY id DESC LIMIT 1)").bind(userId).run();
+}
+
+async function deleteMemoryByTarget(env, userId, target) {
+  const cleanTarget = target.trim();
+  if (!cleanTarget) return 0;
+
+  const exact = await env.DB.prepare(
+    "DELETE FROM memories WHERE user_id = ? AND LOWER(memory) = LOWER(?)"
+  ).bind(userId, cleanTarget).run();
+
+  let deleted = exact.meta?.changes || 0;
+
+  if (!deleted) {
+    const contains = await env.DB.prepare(
+      "DELETE FROM memories WHERE user_id = ? AND LOWER(memory) LIKE LOWER(?)"
+    ).bind(userId, `%${cleanTarget}%`).run();
+    deleted += contains.meta?.changes || 0;
+  }
+
+  if (!deleted) {
+    const words = cleanTarget.split(/\s+/).filter(Boolean);
+    const lastWord = words.at(-1)?.replace(/[^\p{L}\p{N}_-]/gu, "") || "";
+    if (lastWord.length >= 3 && !/^(esto|eso|aqui|allí|alli)$/i.test(lastWord)) {
+      const fallback = await env.DB.prepare(
+        "DELETE FROM memories WHERE user_id = ? AND LOWER(memory) LIKE LOWER(?)"
+      ).bind(userId, `%${lastWord}%`).run();
+      deleted += fallback.meta?.changes || 0;
+    }
+  }
+
+  return deleted;
+}
+
+async function deleteConversationMentions(env, userId, target) {
+  const cleanTarget = target.trim();
+  if (!cleanTarget) return 0;
+
+  const result = await env.DB.prepare(
+    "DELETE FROM conversation_messages WHERE user_id = ? AND LOWER(content) LIKE LOWER(?)"
+  ).bind(userId, `%${cleanTarget}%`).run();
+
+  return result.meta?.changes || 0;
 }
 
 async function getMemories(env, userId) {
