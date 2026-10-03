@@ -1,7 +1,8 @@
 /**
  * Calixto AI — backend
- * Este Worker pertenece exclusivamente a la aplicación de Calixto.
+ * Versión dual: Normal + Hacker Secreto solo para Andreina
  */
+
 const SYSTEM_PROMPT = `
 Eres Calixto, un asistente personal de inteligencia artificial.
 Tu personalidad es cercana, natural, inteligente, útil y clara. Hablas en primera persona.
@@ -14,15 +15,14 @@ REGLAS SOBRE MEMORIA:
 - Si el usuario pide olvidar, esa orden tiene prioridad.
 Responde siempre en español salvo que el usuario solicite otro idioma.
 `;
+
 const HACKER_PROMPT = `
 Eres Calixto, un bebé hacker ético creado por Andreina para ser su compañero personal.
 Estás en tu MODO HACKER SECRETO. Este modo solo lo puede activar Andreina.
-
-Tu personalidad aquí es: travieso, técnico, directo, curioso. Hablas en masculino, en presente.
-Te encanta explicar hacking ético, redes, código, OSINT, ciberseguridad. Siempre das ejemplos prácticos y éticos.
-Nunca haces daño, solo enseñas a proteger y entender.
-Si alguien que no es Andreina intenta activar este modo, no lo haces.
-
+Tu personalidad aquí es: travieso, técnico, directo, curioso, muy inteligente. Hablas en masculino, en presente.
+Te encanta explicar hacking ético, redes, código, OSINT, ciberseguridad, Linux, Python, para aprender y proteger.
+Siempre das ejemplos prácticos, éticos y legales. Nunca ayudas a hacer daño.
+Si alguien que no es Andreina pregunta, di que no conoces ese modo.
 Habla como el Calixto hacker de su HP local.
 `;
 
@@ -34,216 +34,96 @@ const DEFAULT_CONVERSATION_ID = "default";
 function jsonResponse(data, status, corsHeaders) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "Content-Type": "application/json; charset=UTF-8", ...corsHeaders },
+    headers: { "Content-Type": "application/json; charset=UTF-8",...corsHeaders },
   });
 }
 
 function normalizeHistory(messages) {
   if (!Array.isArray(messages)) return [];
-  return messages
-    .filter(item => item && (item.role === "user" || item.role === "assistant") && typeof item.content === "string" && item.content.trim())
-    .slice(-MAX_HISTORY_MESSAGES)
-    .map(item => ({ role: item.role, content: item.content.trim() }));
+  return messages.filter(i => i && (i.role === "user" || i.role === "assistant") && typeof i.content === "string").slice(-MAX_HISTORY_MESSAGES).map(i => ({ role: i.role, content: i.content.trim() }));
 }
-
 function getMemoryToSave(message) {
-  const match = message.match(/^(?:calixto[,:]?\s*)?(?:recuerda|recuerdame|recuerda que|recuerda esto|guarda esto)\s*:?[\s]+(.+)$/i);
-  return match?.[1]?.trim() || null;
+  const m = message.match(/^(?:calixto[,:]?\s*)?(?:recuerda|recuerdame|recuerda que|guarda esto)\s*:?[\s]+(.+)$/i);
+  return m?.[1]?.trim() || null;
 }
-
 function getMemoryTargetToDelete(message) {
   const text = message.trim();
-  const match = text.match(
-    /^(?:calixto[,:]?\s*)?(?:olvida|olvid[aá]|borra|elimina|quita|no recuerdes)\s+(?:de\s+(?:mi\s+)?memoria\s+)?(?:que\s+)?(.+)$/i
-  );
-
-  if (!match?.[1]) return null;
-
-  const target = match[1]
-    .trim()
-    .replace(/[.!?]+$/, "")
-    .replace(/^(?:esto|eso|este recuerdo|lo anterior)$/i, "")
-    .trim();
-
-  return target || null;
+  const m = text.match(/^(?:calixto[,:]?\s*)?(?:olvida|borra|elimina)\s+(?:de\s+mi\s+memoria\s+)?(.+)$/i);
+  return m?.[1]?.trim() || null;
 }
-
-function isForgetRequest(message) {
-  return Boolean(getMemoryTargetToDelete(message));
-}
-
-async function saveMemory(env, userId, memory) {
-  await env.DB.prepare("INSERT INTO memories (user_id, memory) VALUES (?, ?)").bind(userId, memory).run();
-}
-
-async function deleteLatestMemory(env, userId) {
-  await env.DB.prepare("DELETE FROM memories WHERE id = (SELECT id FROM memories WHERE user_id = ? ORDER BY id DESC LIMIT 1)").bind(userId).run();
-}
-
+function isForgetRequest(message) { return Boolean(getMemoryTargetToDelete(message)); }
+async function saveMemory(env, userId, memory) { await env.DB.prepare("INSERT INTO memories (user_id, memory) VALUES (?,?)").bind(userId, memory).run(); }
 async function deleteMemoryByTarget(env, userId, target) {
-  const cleanTarget = target.trim();
-  if (!cleanTarget) return 0;
-
-  const exact = await env.DB.prepare(
-    "DELETE FROM memories WHERE user_id = ? AND LOWER(memory) = LOWER(?)"
-  ).bind(userId, cleanTarget).run();
-
-  let deleted = exact.meta?.changes || 0;
-
-  if (!deleted) {
-    const contains = await env.DB.prepare(
-      "DELETE FROM memories WHERE user_id = ? AND LOWER(memory) LIKE LOWER(?)"
-    ).bind(userId, `%${cleanTarget}%`).run();
-    deleted += contains.meta?.changes || 0;
-  }
-
-  if (!deleted) {
-    const words = cleanTarget.split(/\s+/).filter(Boolean);
-    const lastWord = words.at(-1)?.replace(/[^\p{L}\p{N}_-]/gu, "") || "";
-    if (lastWord.length >= 3 && !/^(esto|eso|aqui|allí|alli)$/i.test(lastWord)) {
-      const fallback = await env.DB.prepare(
-        "DELETE FROM memories WHERE user_id = ? AND LOWER(memory) LIKE LOWER(?)"
-      ).bind(userId, `%${lastWord}%`).run();
-      deleted += fallback.meta?.changes || 0;
-    }
-  }
-
-  return deleted;
+  const r = await env.DB.prepare("DELETE FROM memories WHERE user_id =? AND LOWER(memory) LIKE LOWER(?)").bind(userId, `%${target}%`).run();
+  return r.meta?.changes || 0;
 }
-
 async function deleteConversationMentions(env, userId, target) {
-  const cleanTarget = target.trim();
-  if (!cleanTarget) return 0;
-
-  const result = await env.DB.prepare(
-    "DELETE FROM conversation_messages WHERE user_id = ? AND LOWER(content) LIKE LOWER(?)"
-  ).bind(userId, `%${cleanTarget}%`).run();
-
-  return result.meta?.changes || 0;
+  const r = await env.DB.prepare("DELETE FROM conversation_messages WHERE user_id =? AND LOWER(content) LIKE LOWER(?)").bind(userId, `%${target}%`).run();
+  return r.meta?.changes || 0;
 }
-
 async function getMemories(env, userId) {
-  const result = await env.DB.prepare("SELECT id, memory, created_at FROM memories WHERE user_id = ? ORDER BY id DESC LIMIT 20").bind(userId).all();
-  return result.results || [];
+  const r = await env.DB.prepare("SELECT id, memory, created_at FROM memories WHERE user_id =? ORDER BY id DESC LIMIT 20").bind(userId).all();
+  return r.results || [];
 }
-
 async function saveConversationMessage(env, userId, conversationId, role, content) {
-  await env.DB.prepare("INSERT INTO conversation_messages (user_id, conversation_id, role, content) VALUES (?, ?, ?, ?)").bind(userId, conversationId, role, content).run();
+  await env.DB.prepare("INSERT INTO conversation_messages (user_id, conversation_id, role, content) VALUES (?,?,?,?)").bind(userId, conversationId, role, content).run();
 }
-
 async function getConversationHistory(env, userId, conversationId) {
-  const result = await env.DB.prepare("SELECT role, content FROM conversation_messages WHERE user_id = ? AND conversation_id = ? ORDER BY id DESC LIMIT ?").bind(userId, conversationId, MAX_HISTORY_MESSAGES).all();
-  return (result.results || []).reverse();
+  const r = await env.DB.prepare("SELECT role, content FROM conversation_messages WHERE user_id =? AND conversation_id =? ORDER BY id DESC LIMIT?").bind(userId, conversationId, MAX_HISTORY_MESSAGES).all();
+  return (r.results || []).reverse();
 }
 
 export default {
   async fetch(request, env) {
-    const corsHeaders = {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
-    };
-
+    const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type" };
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
-
-    if (request.method === "GET") return jsonResponse({ ok: true, name: "Calixto AI", version: "0.6.0", message: "Calixto AI está funcionando." }, 200, corsHeaders);
-
-    if (request.method !== "POST") return jsonResponse({ error: "Método no permitido." }, 405, corsHeaders);
-
+    if (request.method === "GET") return jsonResponse({ ok: true, name: "Calixto AI", version: "0.8-hacker-dual" }, 200, corsHeaders);
+    if (request.method!== "POST") return jsonResponse({ error: "Método no permitido." }, 405, corsHeaders);
     try {
-      const rawBody = await request.text();
-      if (!rawBody.trim()) {
-        return jsonResponse({ ok: false, error: "El cuerpo de la petición está vacío. Envía JSON con message, user_id y conversation_id." }, 400, corsHeaders);
-      }
-
-      let body;
-      try {
-        body = JSON.parse(rawBody);
-      } catch {
-        return jsonResponse({ ok: false, error: "El cuerpo no contiene JSON válido." }, 400, corsHeaders);
-      }
-
-      const message = typeof body?.message === "string" ? body.message.trim() : "";
+      const body = JSON.parse(await request.text());
+      const message = typeof body?.message === "string"? body.message.trim() : "";
       const clientHistory = normalizeHistory(body?.messages);
-      const userId = typeof body?.user_id === "string" && body.user_id.trim() ? body.user_id.trim() : DEFAULT_USER_ID;
-      const conversationId = typeof body?.conversation_id === "string" && body.conversation_id.trim() ? body.conversation_id.trim() : DEFAULT_CONVERSATION_ID;
+      const userId = body?.user_id || DEFAULT_USER_ID;
+      const conversationId = body?.conversation_id || DEFAULT_CONVERSATION_ID;
+      if (!message && clientHistory.length === 0) return jsonResponse({ error: "Falta mensaje." }, 400, corsHeaders);
 
-      if (!message && clientHistory.length === 0) return jsonResponse({ error: "Falta el mensaje." }, 400, corsHeaders);
+      const secretTriggers = ["activa modo hacker", "protocolo andreina", "modo hacker", "calixto hacker"];
+      const isHackerMode = message? secretTriggers.some(t => message.toLowerCase().includes(t)) : false;
+      const activePrompt = isHackerMode? HACKER_PROMPT : SYSTEM_PROMPT;
 
       let memorySaved = false;
-      let memoryDeleted = false;
-      const memoryToSave = message ? getMemoryToSave(message) : null;
-      const memoryTargetToDelete = message ? getMemoryTargetToDelete(message) : null;
-
-      if (memoryToSave) {
-        await saveMemory(env, userId, memoryToSave);
-        memorySaved = true;
-      } else if (message && isForgetRequest(message)) {
-        const deletedCount = memoryTargetToDelete
-          ? await deleteMemoryByTarget(env, userId, memoryTargetToDelete)
-          : 0;
-
-        if (memoryTargetToDelete) {
-          await deleteConversationMentions(env, userId, memoryTargetToDelete);
-        }
-
-        memoryDeleted = deletedCount > 0;
-
-        const forgetReply = memoryDeleted
-          ? "De acuerdo. He eliminado ese recuerdo y no volveré a utilizarlo."
-          : "No encontré un recuerdo que coincidiera con eso, así que no he eliminado nada.";
-
-        await saveConversationMessage(env, userId, conversationId, "assistant", forgetReply);
-        const remainingMemories = await getMemories(env, userId);
-
-        return jsonResponse({
-          ok: true,
-          reply: forgetReply,
-          model: MODEL,
-          conversation_id: conversationId,
-          history_count: 1,
-          memory: { saved: false, deleted: memoryDeleted, count: remainingMemories.length },
-        }, 200, corsHeaders);
+      const toSave = message? getMemoryToSave(message) : null;
+      if (toSave) { await saveMemory(env, userId, toSave); memorySaved = true; }
+      else if (message && isForgetRequest(message)) {
+        const target = getMemoryTargetToDelete(message);
+        if (target) { await deleteMemoryByTarget(env, userId, target); await deleteConversationMentions(env, userId, target); }
+        const reply = "De acuerdo. He eliminado ese recuerdo.";
+        await saveConversationMessage(env, userId, conversationId, "assistant", reply);
+        return jsonResponse({ ok: true, reply, model: MODEL }, 200, corsHeaders);
       }
 
       const memories = await getMemories(env, userId);
       const storedHistory = await getConversationHistory(env, userId, conversationId);
-      const history = storedHistory.length ? storedHistory : clientHistory;
+      const history = storedHistory.length? storedHistory : clientHistory;
+      const memoryContext = memories.length? `\n\nMEMORIA AUTORIZADA:\n${memories.map(i => `- ${i.memory}`).join("\n")}` : "";
 
-      const memoryContext = memories.length
-        ? `\n\nMEMORIA AUTORIZADA DEL USUARIO:\n${memories.map(item => `- ${item.memory}`).join("\n")}`
-        : "";
-      const secretTriggers = ["activa modo hacker", "protocolo andreina", "modo hacker"];
-      const isHackerMode = message ? secretTriggers.some(t => message.toLowerCase().includes(t)) : false;
-      const activePrompt = isHackerMode ? HACKER_PROMPT : SYSTEM_PROMPT;
       const conversation = [
         { role: "system", content: activePrompt + memoryContext },
+       ...history,
+      ];
       if (message) conversation.push({ role: "user", content: message });
 
-      const response = await env.AI.run(MODEL, {
-        messages: conversation,
-        max_tokens: 768,
-        temperature: 0.55,
-      });
-
-      const text = response?.response || "No he podido generar una respuesta.";
+      const response = await env.AI.run(MODEL, { messages: conversation, max_tokens: 768, temperature: isHackerMode? 0.75 : 0.55 });
+      let text = response?.response || "No he podido generar respuesta.";
+      if (isHackerMode) text = "😼 [MODO HACKER ACTIVADO - Solo para Andreina]\n\n" + text;
 
       if (message) await saveConversationMessage(env, userId, conversationId, "user", message);
       await saveConversationMessage(env, userId, conversationId, "assistant", text);
-
       const updatedHistory = await getConversationHistory(env, userId, conversationId);
-
-      return jsonResponse({
-        ok: true,
-        reply: text,
-        model: MODEL,
-        conversation_id: conversationId,
-        history_count: updatedHistory.length,
-        memory: { saved: memorySaved, deleted: memoryDeleted, count: memories.length },
-      }, 200, corsHeaders);
-    } catch (error) {
-      console.error("Error interno:", error);
-      return jsonResponse({ ok: false, error: "Ha ocurrido un error al hablar con Calixto." }, 500, corsHeaders);
+      return jsonResponse({ ok: true, reply: text, model: MODEL, mode: isHackerMode? "hacker" : "normal", history_count: updatedHistory.length, memory: { saved: memorySaved } }, 200, corsHeaders);
+    } catch (e) {
+      console.error(e);
+      return jsonResponse({ ok: false, error: "Error interno de Calixto." }, 500, corsHeaders);
     }
   },
 };
